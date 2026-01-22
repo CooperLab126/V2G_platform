@@ -18,8 +18,10 @@ const ChargingControl = () => {
   
   const initialMode = (searchParams.get("mode") as Mode) || "charging";
   const [mode, setMode] = useState<Mode>(initialMode);
-  const [targetSoc, setTargetSoc] = useState(80);
-  const [minSoc, setMinSoc] = useState(30);
+  // Initialize targetSoc based on currentSoc - should be at least currentSoc
+  const [targetSoc, setTargetSoc] = useState(() => Math.max(80, currentSoc));
+  // Initialize minSoc - should be less than currentSoc
+  const [minSoc, setMinSoc] = useState(() => Math.min(30, currentSoc - 10));
 
   const primaryVehicle = vehicles.find((v) => v.isPrimary);
   const batteryCapacity = primaryVehicle?.batteryCapacity || 60;
