@@ -8,7 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 const WalletPage = () => {
   const { transactions, pricing } = useAppStore();
 
-  const totalBalance = 2456;
+  // Calculate balance from all transactions
+  const totalBalance = transactions.reduce((sum, t) => sum + t.amount, 0);
   const monthlyEarnings = transactions
     .filter((t) => t.type === "v2g_earning")
     .reduce((sum, t) => sum + t.amount, 0);
