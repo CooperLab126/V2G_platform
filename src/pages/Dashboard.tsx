@@ -6,9 +6,13 @@ import { QuickStats } from "@/components/dashboard/QuickStats";
 import { QuickActions } from "@/components/dashboard/QuickActions";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
 import { ConnectionStatus } from "@/components/dashboard/ConnectionStatus";
+import { useSessionSimulation } from "@/hooks/useSessionSimulation";
 
 const Dashboard = () => {
   const { user, currentSession, currentSoc, vehicles } = useAppStore();
+  
+  // Enable session simulation (battery updates)
+  useSessionSimulation();
 
   const getGreeting = () => {
     const hour = new Date().getHours();
