@@ -11,15 +11,8 @@ export function QuickStats() {
     .filter((t) => new Date(t.date).toDateString() === today && t.type === "v2g_earning")
     .reduce((sum, t) => sum + t.amount, 0);
 
-  // Calculate this month's total earnings
-  const thisMonth = new Date().getMonth();
-  const thisYear = new Date().getFullYear();
-  const monthlyTotal = transactions
-    .filter((t) => {
-      const txDate = new Date(t.date);
-      return txDate.getMonth() === thisMonth && txDate.getFullYear() === thisYear;
-    })
-    .reduce((sum, t) => sum + t.amount, 0);
+  // Calculate total balance (all transactions)
+  const totalBalance = transactions.reduce((sum, t) => sum + t.amount, 0);
 
   return (
     <div className="grid grid-cols-3 gap-3">
@@ -58,12 +51,12 @@ export function QuickStats() {
         <CardContent className="p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-2">
             <Calendar className="h-4 w-4" />
-            <span className="text-xs">Month</span>
+            <span className="text-xs">Balance</span>
           </div>
           <p className="text-xl font-bold text-foreground">
-            NT$ {monthlyTotal.toFixed(0)}
+            NT$ {totalBalance.toFixed(0)}
           </p>
-          <p className="text-xs text-muted-foreground mt-1">Net earnings</p>
+          <p className="text-xs text-muted-foreground mt-1">Total</p>
         </CardContent>
       </Card>
     </div>
