@@ -6,7 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useAppStore } from "@/store/appStore";
+import { useAuth } from "@/hooks/useAuth";
+import { useCreateVehicle } from "@/hooks/useVehicles";
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -16,7 +17,9 @@ type Step = 1 | 2 | 3;
 const RegisterPage = () => {
   const [step, setStep] = useState<Step>(1);
   const [showPassword, setShowPassword] = useState(false);
-  const { login } = useAppStore();
+  const [isLoading, setIsLoading] = useState(false);
+  const { signUp } = useAuth();
+  const createVehicle = useCreateVehicle();
   const navigate = useNavigate();
 
   // Step 1 - Account Info
@@ -46,7 +49,7 @@ const RegisterPage = () => {
 
   const passwordStrength = getPasswordStrength();
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (step === 1) {
       if (!name || !email || !password || !confirmPassword) {
         toast.error("Please fill in all required fields");
@@ -56,29 +59,57 @@ const RegisterPage = () => {
         toast.error("Passwords don't match");
         return;
       }
+      if (password.length < 6) {
+        toast.error("Password must be at least 6 characters");
+        return;
+      }
       if (!agreeTerms) {
         toast.error("Please agree to the terms and conditions");
         return;
       }
+
+      setIsLoading(true);
+      const { error } = await signUp(email, password, name);
+      
+      if (error) {
+        toast.error(error.message || "Registration failed");
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(false);
       setStep(2);
     } else if (step === 2) {
       if (!vehicleBrand || !vehicleModel || !batteryCapacity || !licensePlate || !connectorType) {
         toast.error("Please fill in all vehicle details");
         return;
       }
-      setStep(3);
+      
+      setIsLoading(true);
+      try {
+        await createVehicle.mutateAsync({
+          brand: vehicleBrand,
+          model: vehicleModel,
+          battery_capacity: parseFloat(batteryCapacity),
+          license_plate: licensePlate,
+          connector_type: connectorType.toUpperCase(),
+          is_primary: true,
+        });
+        setStep(3);
+      } catch (error: any) {
+        toast.error(error.message || "Failed to add vehicle");
+      }
+      setIsLoading(false);
     }
   };
 
   const handleComplete = () => {
-    login({
-      id: "1",
-      name,
-      email,
-      language: "en",
-    });
     toast.success("Registration complete! Welcome to MCUT V2G Platform");
     navigate("/");
+  };
+
+  const handleSkipVehicle = () => {
+    setStep(3);
   };
 
   const StepIndicator = () => (
@@ -123,7 +154,7 @@ const RegisterPage = () => {
             </button>
           )}
 
-          {step < 3 && (
+          {step === 1 && (
             <Link
               to="/login"
               className="flex items-center gap-2 text-muted-foreground hover:text-foreground mb-4"
@@ -158,6 +189,7 @@ const RegisterPage = () => {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="pl-10"
+                    disabled={isLoading}
                   />
                 </div>
               </div>
@@ -173,6 +205,7 @@ const RegisterPage = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="pl-10"
+                    disabled={isLoading}
                   />
                 </div>
               </div>
@@ -188,6 +221,7 @@ const RegisterPage = () => {
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     className="pl-10"
+                    disabled={isLoading}
                   />
                 </div>
               </div>
@@ -199,10 +233,11 @@ const RegisterPage = () => {
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
-                    placeholder="Create a password"
+                    placeholder="Create a password (min 6 characters)"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="pl-10 pr-10"
+                    disabled={isLoading}
                   />
                   <button
                     type="button"
@@ -244,6 +279,7 @@ const RegisterPage = () => {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     className="pl-10"
+                    disabled={isLoading}
                   />
                 </div>
               </div>
@@ -267,8 +303,8 @@ const RegisterPage = () => {
                 </Label>
               </div>
 
-              <Button onClick={handleNext} className="w-full h-12" size="lg">
-                Next
+              <Button onClick={handleNext} className="w-full h-12" size="lg" disabled={isLoading}>
+                {isLoading ? "Creating account..." : "Next"}
               </Button>
             </div>
           )}
@@ -280,16 +316,19 @@ const RegisterPage = () => {
 
               <div className="space-y-2">
                 <Label>Vehicle Brand *</Label>
-                <Select value={vehicleBrand} onValueChange={setVehicleBrand}>
+                <Select value={vehicleBrand} onValueChange={setVehicleBrand} disabled={isLoading}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select brand" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="tesla">Tesla</SelectItem>
-                    <SelectItem value="nissan">Nissan</SelectItem>
-                    <SelectItem value="byd">BYD</SelectItem>
-                    <SelectItem value="bmw">BMW</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    <SelectItem value="Tesla">Tesla</SelectItem>
+                    <SelectItem value="Nissan">Nissan</SelectItem>
+                    <SelectItem value="BYD">BYD</SelectItem>
+                    <SelectItem value="BMW">BMW</SelectItem>
+                    <SelectItem value="Volkswagen">Volkswagen</SelectItem>
+                    <SelectItem value="Hyundai">Hyundai</SelectItem>
+                    <SelectItem value="Kia">Kia</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -301,6 +340,7 @@ const RegisterPage = () => {
                   placeholder="e.g., Model Y"
                   value={vehicleModel}
                   onChange={(e) => setVehicleModel(e.target.value)}
+                  disabled={isLoading}
                 />
               </div>
 
@@ -312,6 +352,7 @@ const RegisterPage = () => {
                   placeholder="e.g., 60"
                   value={batteryCapacity}
                   onChange={(e) => setBatteryCapacity(e.target.value)}
+                  disabled={isLoading}
                 />
                 <p className="text-xs text-muted-foreground">
                   Check your vehicle's specifications for the exact capacity
@@ -325,25 +366,36 @@ const RegisterPage = () => {
                   placeholder="e.g., ABC-1234"
                   value={licensePlate}
                   onChange={(e) => setLicensePlate(e.target.value)}
+                  disabled={isLoading}
                 />
               </div>
 
               <div className="space-y-2">
                 <Label>Connector Type *</Label>
-                <Select value={connectorType} onValueChange={setConnectorType}>
+                <Select value={connectorType} onValueChange={setConnectorType} disabled={isLoading}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select connector" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ccs2">CCS2</SelectItem>
-                    <SelectItem value="chademo">CHAdeMO</SelectItem>
-                    <SelectItem value="gbt">GB/T</SelectItem>
+                    <SelectItem value="CCS2">CCS2</SelectItem>
+                    <SelectItem value="CHAdeMO">CHAdeMO</SelectItem>
+                    <SelectItem value="Type2">Type 2</SelectItem>
+                    <SelectItem value="GB/T">GB/T</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <Button onClick={handleNext} className="w-full h-12" size="lg">
-                Next
+              <Button onClick={handleNext} className="w-full h-12" size="lg" disabled={isLoading}>
+                {isLoading ? "Adding vehicle..." : "Next"}
+              </Button>
+              
+              <Button 
+                variant="ghost" 
+                onClick={handleSkipVehicle} 
+                className="w-full" 
+                disabled={isLoading}
+              >
+                Skip for now
               </Button>
             </div>
           )}

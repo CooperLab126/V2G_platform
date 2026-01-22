@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
-import { useAppStore } from "@/store/appStore";
+import { useAuth } from "@/hooks/useAuth";
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -14,20 +14,27 @@ const LoginPage = () => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const [language, setLanguage] = useState<"en" | "zh">("en");
-  const { login } = useAppStore();
+  const [isLoading, setIsLoading] = useState(false);
+  const { signIn } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Mock login
-    login({
-      id: "1",
-      name: "Cooper",
-      email: email || "cooper@example.com",
-      language,
-    });
+    if (!email || !password) {
+      toast.error("Please enter email and password");
+      return;
+    }
+
+    setIsLoading(true);
+    
+    const { error } = await signIn(email, password);
+    
+    if (error) {
+      toast.error(error.message || "Login failed");
+      setIsLoading(false);
+      return;
+    }
     
     toast.success("Welcome back!");
     navigate("/");
@@ -35,16 +42,6 @@ const LoginPage = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-secondary/5 p-4">
-      {/* Language Toggle */}
-      <div className="fixed top-4 right-4">
-        <button
-          onClick={() => setLanguage(language === "en" ? "zh" : "en")}
-          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          {language === "en" ? "EN" : "中文"} | {language === "en" ? "中文" : "EN"}
-        </button>
-      </div>
-
       <Card className="w-full max-w-md">
         <CardContent className="p-8">
           {/* Logo */}
@@ -76,6 +73,7 @@ const LoginPage = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="pl-10"
+                  disabled={isLoading}
                 />
               </div>
             </div>
@@ -91,6 +89,7 @@ const LoginPage = () => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-10 pr-10"
+                  disabled={isLoading}
                 />
                 <button
                   type="button"
@@ -113,16 +112,10 @@ const LoginPage = () => {
                   Remember me
                 </Label>
               </div>
-              <Link
-                to="/forgot-password"
-                className="text-sm text-primary hover:underline"
-              >
-                Forgot password?
-              </Link>
             </div>
 
-            <Button type="submit" className="w-full h-12" size="lg">
-              Sign In
+            <Button type="submit" className="w-full h-12" size="lg" disabled={isLoading}>
+              {isLoading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
 

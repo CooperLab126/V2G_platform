@@ -5,7 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useAppStore } from "@/store/appStore";
+import { useCurrentSoc } from "@/hooks/useCurrentSoc";
+import { useActiveSession, useCreateSession, useUpdateSession } from "@/hooks/useSessions";
+import { usePrimaryVehicle } from "@/hooks/useVehicles";
+import { usePricing, defaultPricing } from "@/hooks/usePricing";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -14,18 +17,21 @@ type Mode = "charging" | "v2g" | "auto";
 const ChargingControl = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { currentSoc, currentSession, pricing, setCurrentSession, vehicles } = useAppStore();
+  const { currentSoc } = useCurrentSoc();
+  const { data: activeSession } = useActiveSession();
+  const { data: pricing } = usePricing();
+  const primaryVehicle = usePrimaryVehicle();
+  const createSession = useCreateSession();
+  const updateSession = useUpdateSession();
   
+  const rate = pricing || defaultPricing;
   const initialMode = (searchParams.get("mode") as Mode) || "charging";
   const [mode, setMode] = useState<Mode>(initialMode);
-  // Initialize targetSoc based on currentSoc - should be at least currentSoc
   const [targetSoc, setTargetSoc] = useState(() => Math.max(80, currentSoc));
-  // Initialize minSoc - should be less than currentSoc
   const [minSoc, setMinSoc] = useState(() => Math.min(30, currentSoc - 10));
 
-  const primaryVehicle = vehicles.find((v) => v.isPrimary);
-  const batteryCapacity = primaryVehicle?.batteryCapacity || 60;
-  const isActive = !!currentSession;
+  const batteryCapacity = primaryVehicle?.battery_capacity || 60;
+  const isActive = !!activeSession;
 
   const estimatedRange = Math.round((currentSoc / 100) * 400);
 
@@ -33,41 +39,56 @@ const ChargingControl = () => {
   const chargeNeeded = targetSoc - currentSoc;
   const chargeKwh = (chargeNeeded / 100) * batteryCapacity;
   const chargeTime = chargeKwh > 0 ? Math.ceil(chargeKwh / 22 * 60) : 0;
-  const chargeCost = chargeKwh * pricing.buyRate;
+  const chargeCost = chargeKwh * rate.buy_rate;
 
   const sellableEnergy = currentSoc - minSoc;
   const sellKwh = (sellableEnergy / 100) * batteryCapacity;
   const sellTime = sellKwh > 0 ? Math.ceil(sellKwh / 7.2 * 60) : 0;
-  const sellEarnings = sellKwh * pricing.sellRate;
+  const sellEarnings = sellKwh * rate.sell_rate;
 
-  const handleStartSession = () => {
+  const handleStartSession = async () => {
     if (mode === "auto") return;
 
-    const session = {
-      id: `SES-${Date.now()}`,
-      stationId: "A-01",
-      mode,
-      status: "active" as const,
-      startTime: new Date().toISOString(),
-      currentSoc,
-      startSoc: currentSoc,
-      targetSoc: mode === "charging" ? targetSoc : undefined,
-      minSoc: mode === "v2g" ? minSoc : undefined,
-      powerKw: mode === "charging" ? 22 : 7.2,
-      energyKwh: 0,
-      currentAmount: 0,
-    };
+    try {
+      await createSession.mutateAsync({
+        station_id: "A-01",
+        vehicle_id: primaryVehicle?.id || null,
+        mode,
+        status: "active",
+        start_time: new Date().toISOString(),
+        end_time: null,
+        start_soc: currentSoc,
+        end_soc: null,
+        target_soc: mode === "charging" ? targetSoc : null,
+        min_soc: mode === "v2g" ? minSoc : null,
+        power_kw: mode === "charging" ? 22 : 7.2,
+        energy_kwh: 0,
+        amount: 0,
+      });
 
-    setCurrentSession(session);
-    toast.success(
-      mode === "charging" ? "Charging session started!" : "V2G session started!"
-    );
-    navigate("/");
+      toast.success(
+        mode === "charging" ? "Charging session started!" : "V2G session started!"
+      );
+      navigate("/");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to start session");
+    }
   };
 
-  const handleStopSession = () => {
-    setCurrentSession(null);
-    toast.success("Session stopped successfully");
+  const handleStopSession = async () => {
+    if (!activeSession) return;
+    
+    try {
+      await updateSession.mutateAsync({
+        id: activeSession.id,
+        status: "cancelled",
+        end_time: new Date().toISOString(),
+        end_soc: currentSoc,
+      });
+      toast.success("Session stopped successfully");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to stop session");
+    }
   };
 
   return (
@@ -96,20 +117,8 @@ const ChargingControl = () => {
                 : "border-border bg-card hover:border-secondary/50"
             )}
           >
-            <BatteryCharging
-              className={cn(
-                "h-6 w-6",
-                mode === "charging" ? "text-secondary" : "text-muted-foreground"
-              )}
-            />
-            <span
-              className={cn(
-                "font-medium text-sm",
-                mode === "charging" ? "text-secondary" : "text-muted-foreground"
-              )}
-            >
-              Charge
-            </span>
+            <BatteryCharging className={cn("h-6 w-6", mode === "charging" ? "text-secondary" : "text-muted-foreground")} />
+            <span className={cn("font-medium text-sm", mode === "charging" ? "text-secondary" : "text-muted-foreground")}>Charge</span>
           </button>
 
           <button
@@ -121,26 +130,11 @@ const ChargingControl = () => {
                 : "border-border bg-card hover:border-accent/50"
             )}
           >
-            <Zap
-              className={cn(
-                "h-6 w-6",
-                mode === "v2g" ? "text-accent" : "text-muted-foreground"
-              )}
-            />
-            <span
-              className={cn(
-                "font-medium text-sm",
-                mode === "v2g" ? "text-accent" : "text-muted-foreground"
-              )}
-            >
-              V2G
-            </span>
+            <Zap className={cn("h-6 w-6", mode === "v2g" ? "text-accent" : "text-muted-foreground")} />
+            <span className={cn("font-medium text-sm", mode === "v2g" ? "text-accent" : "text-muted-foreground")}>V2G</span>
           </button>
 
-          <button
-            disabled
-            className="flex flex-col items-center gap-2 rounded-xl p-4 border-2 border-border bg-muted/50 opacity-50"
-          >
+          <button disabled className="flex flex-col items-center gap-2 rounded-xl p-4 border-2 border-border bg-muted/50 opacity-50">
             <Sparkles className="h-6 w-6 text-muted-foreground" />
             <span className="font-medium text-sm text-muted-foreground">Auto</span>
             <span className="text-xs text-muted-foreground">Soon</span>
@@ -161,10 +155,7 @@ const ChargingControl = () => {
               </div>
             </div>
             <div className="mt-4 h-3 rounded-full bg-muted overflow-hidden">
-              <div
-                className="h-full bg-primary rounded-full transition-all duration-500"
-                style={{ width: `${currentSoc}%` }}
-              />
+              <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${currentSoc}%` }} />
             </div>
           </CardContent>
         </Card>
@@ -175,13 +166,9 @@ const ChargingControl = () => {
             <CardTitle className="flex items-center gap-2">
               {mode === "charging" ? "Target SOC" : "Minimum SOC"}
               <Tooltip>
-                <TooltipTrigger>
-                  <Info className="h-4 w-4 text-muted-foreground" />
-                </TooltipTrigger>
+                <TooltipTrigger><Info className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
                 <TooltipContent>
-                  {mode === "charging"
-                    ? "Charging will stop when battery reaches this level"
-                    : "V2G will stop when battery reaches this level"}
+                  {mode === "charging" ? "Charging will stop when battery reaches this level" : "V2G will stop when battery reaches this level"}
                 </TooltipContent>
               </Tooltip>
             </CardTitle>
@@ -191,89 +178,39 @@ const ChargingControl = () => {
               <>
                 <div className="flex items-center justify-between">
                   <span className="text-4xl font-bold text-secondary">{targetSoc}%</span>
-                  <span className="text-sm text-muted-foreground">
-                    +{chargeNeeded > 0 ? chargeNeeded : 0}% from current
-                  </span>
+                  <span className="text-sm text-muted-foreground">+{chargeNeeded > 0 ? chargeNeeded : 0}% from current</span>
                 </div>
-                <Slider
-                  value={[targetSoc]}
-                  onValueChange={(v) => setTargetSoc(v[0])}
-                  min={currentSoc}
-                  max={100}
-                  step={5}
-                  className="py-4"
-                />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{currentSoc}%</span>
-                  <span>100%</span>
-                </div>
+                <Slider value={[targetSoc]} onValueChange={(v) => setTargetSoc(v[0])} min={currentSoc} max={100} step={5} className="py-4" />
               </>
             ) : (
               <>
                 <div className="flex items-center justify-between">
                   <span className="text-4xl font-bold text-accent">{minSoc}%</span>
-                  <span className="text-sm text-muted-foreground">
-                    {sellableEnergy > 0 ? sellableEnergy : 0}% available to sell
-                  </span>
+                  <span className="text-sm text-muted-foreground">{sellableEnergy > 0 ? sellableEnergy : 0}% available to sell</span>
                 </div>
-                <Slider
-                  value={[minSoc]}
-                  onValueChange={(v) => setMinSoc(v[0])}
-                  min={20}
-                  max={Math.min(currentSoc, 80)}
-                  step={5}
-                  className="py-4"
-                />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>20%</span>
-                  <span>{Math.min(currentSoc, 80)}%</span>
-                </div>
-                {currentSoc <= minSoc && (
-                  <p className="text-sm text-destructive">
-                    ⚠️ Current SOC is at or below minimum level
-                  </p>
-                )}
+                <Slider value={[minSoc]} onValueChange={(v) => setMinSoc(v[0])} min={20} max={Math.min(currentSoc, 80)} step={5} className="py-4" />
               </>
             )}
           </CardContent>
         </Card>
 
         {/* Session Preview */}
-        <Card
-          className={cn(
-            "border-2",
-            mode === "charging" ? "border-secondary/50" : "border-accent/50"
-          )}
-        >
-          <CardHeader>
-            <CardTitle className="text-base">Session Preview</CardTitle>
-          </CardHeader>
+        <Card className={cn("border-2", mode === "charging" ? "border-secondary/50" : "border-accent/50")}>
+          <CardHeader><CardTitle className="text-base">Session Preview</CardTitle></CardHeader>
           <CardContent>
             <div className="grid grid-cols-3 gap-4 text-center">
               <div>
                 <p className="text-sm text-muted-foreground">Duration</p>
-                <p className="text-lg font-semibold text-foreground">
-                  ~{mode === "charging" ? chargeTime : sellTime} min
-                </p>
+                <p className="text-lg font-semibold text-foreground">~{mode === "charging" ? chargeTime : sellTime} min</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Energy</p>
-                <p className="text-lg font-semibold text-foreground">
-                  {(mode === "charging" ? chargeKwh : sellKwh).toFixed(1)} kWh
-                </p>
+                <p className="text-lg font-semibold text-foreground">{(mode === "charging" ? chargeKwh : sellKwh).toFixed(1)} kWh</p>
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">
-                  {mode === "charging" ? "Cost" : "Earnings"}
-                </p>
-                <p
-                  className={cn(
-                    "text-lg font-semibold",
-                    mode === "charging" ? "text-destructive" : "text-secondary"
-                  )}
-                >
-                  {mode === "charging" ? "-" : "+"}NT${" "}
-                  {(mode === "charging" ? chargeCost : sellEarnings).toFixed(0)}
+                <p className="text-sm text-muted-foreground">{mode === "charging" ? "Cost" : "Earnings"}</p>
+                <p className={cn("text-lg font-semibold", mode === "charging" ? "text-destructive" : "text-secondary")}>
+                  {mode === "charging" ? "-" : "+"}NT$ {(mode === "charging" ? chargeCost : sellEarnings).toFixed(0)}
                 </p>
               </div>
             </div>
@@ -282,40 +219,17 @@ const ChargingControl = () => {
 
         {/* Action Button */}
         {isActive ? (
-          <Button
-            size="lg"
-            variant="outline"
-            className="w-full h-14 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
-            onClick={handleStopSession}
-          >
+          <Button size="lg" variant="outline" className="w-full h-14 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground" onClick={handleStopSession}>
             Stop Session
           </Button>
         ) : (
           <Button
             size="lg"
-            className={cn(
-              "w-full h-14",
-              mode === "charging"
-                ? "bg-secondary hover:bg-secondary/90"
-                : "bg-accent hover:bg-accent/90"
-            )}
+            className={cn("w-full h-14", mode === "charging" ? "bg-secondary hover:bg-secondary/90" : "bg-accent hover:bg-accent/90")}
             onClick={handleStartSession}
-            disabled={
-              (mode === "charging" && chargeNeeded <= 0) ||
-              (mode === "v2g" && sellableEnergy <= 0)
-            }
+            disabled={(mode === "charging" && chargeNeeded <= 0) || (mode === "v2g" && sellableEnergy <= 0) || createSession.isPending}
           >
-            {mode === "charging" ? (
-              <>
-                <BatteryCharging className="h-5 w-5 mr-2" />
-                Start Charging
-              </>
-            ) : (
-              <>
-                <Zap className="h-5 w-5 mr-2" />
-                Start V2G
-              </>
-            )}
+            {mode === "charging" ? <><BatteryCharging className="h-5 w-5 mr-2" />Start Charging</> : <><Zap className="h-5 w-5 mr-2" />Start V2G</>}
           </Button>
         )}
       </div>

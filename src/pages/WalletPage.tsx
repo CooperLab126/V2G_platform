@@ -1,15 +1,16 @@
 import { ArrowUp, ArrowDown, CreditCard, Banknote, Leaf, Zap, History } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useAppStore } from "@/store/appStore";
+import { useTransactions, useTotalBalance } from "@/hooks/useTransactions";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const WalletPage = () => {
-  const { transactions, pricing } = useAppStore();
+  const { data: transactions = [], isLoading } = useTransactions();
+  const totalBalance = useTotalBalance();
 
   // Calculate balance from all transactions
-  const totalBalance = transactions.reduce((sum, t) => sum + t.amount, 0);
   const monthlyEarnings = transactions
     .filter((t) => t.type === "v2g_earning")
     .reduce((sum, t) => sum + t.amount, 0);
@@ -23,7 +24,7 @@ const WalletPage = () => {
   ).length;
   const totalEnergySold = transactions
     .filter((t) => t.type === "v2g_earning")
-    .reduce((sum, t) => sum + (t.energyKwh || 0), 0);
+    .reduce((sum, t) => sum + (t.energy_kwh || 0), 0);
   const co2Saved = totalEnergySold * 0.5;
 
   const formatDate = (dateString: string) => {
@@ -47,21 +48,33 @@ const WalletPage = () => {
     });
   };
 
-  const groupedTransactions = transactions.reduce((groups, transaction) => {
-    const dateKey = formatDate(transaction.date);
-    if (!groups[dateKey]) {
-      groups[dateKey] = [];
-    }
-    groups[dateKey].push(transaction);
-    return groups;
-  }, {} as Record<string, typeof transactions>);
-
   const filterTransactions = (type: string) => {
     if (type === "all") return transactions;
     if (type === "earnings") return transactions.filter((t) => t.type === "v2g_earning");
     if (type === "costs") return transactions.filter((t) => t.type === "charging_cost");
     return transactions;
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-lg border-b border-border">
+          <div className="px-4 py-4 lg:px-8">
+            <h1 className="font-bold text-2xl">Wallet</h1>
+          </div>
+        </header>
+        <div className="px-4 py-6 lg:px-8 space-y-6 max-w-2xl mx-auto">
+          <Skeleton className="h-48 w-full rounded-xl" />
+          <Skeleton className="h-32 w-full rounded-xl" />
+          <div className="grid grid-cols-3 gap-3">
+            <Skeleton className="h-24 rounded-xl" />
+            <Skeleton className="h-24 rounded-xl" />
+            <Skeleton className="h-24 rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -166,76 +179,84 @@ const WalletPage = () => {
             <CardTitle className="text-base">Transactions</CardTitle>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="all">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="all">All</TabsTrigger>
-                <TabsTrigger value="earnings">Earnings</TabsTrigger>
-                <TabsTrigger value="costs">Costs</TabsTrigger>
-              </TabsList>
-              {["all", "earnings", "costs"].map((tab) => (
-                <TabsContent key={tab} value={tab} className="space-y-4 mt-4">
-                  {Object.entries(
-                    filterTransactions(tab).reduce((groups, t) => {
-                      const dateKey = formatDate(t.date);
-                      if (!groups[dateKey]) groups[dateKey] = [];
-                      groups[dateKey].push(t);
-                      return groups;
-                    }, {} as Record<string, typeof transactions>)
-                  ).map(([date, txns]) => (
-                    <div key={date}>
-                      <p className="text-sm font-medium text-muted-foreground mb-2">
-                        {date}
-                      </p>
-                      {txns.map((transaction) => (
-                        <div
-                          key={transaction.id}
-                          className="flex items-center justify-between py-3 border-b border-border last:border-0"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div
+            {transactions.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <History className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                <p>No transactions yet</p>
+                <p className="text-sm">Start a charging or V2G session to see your history</p>
+              </div>
+            ) : (
+              <Tabs defaultValue="all">
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="all">All</TabsTrigger>
+                  <TabsTrigger value="earnings">Earnings</TabsTrigger>
+                  <TabsTrigger value="costs">Costs</TabsTrigger>
+                </TabsList>
+                {["all", "earnings", "costs"].map((tab) => (
+                  <TabsContent key={tab} value={tab} className="space-y-4 mt-4">
+                    {Object.entries(
+                      filterTransactions(tab).reduce((groups, t) => {
+                        const dateKey = formatDate(t.created_at);
+                        if (!groups[dateKey]) groups[dateKey] = [];
+                        groups[dateKey].push(t);
+                        return groups;
+                      }, {} as Record<string, typeof transactions>)
+                    ).map(([date, txns]) => (
+                      <div key={date}>
+                        <p className="text-sm font-medium text-muted-foreground mb-2">
+                          {date}
+                        </p>
+                        {txns.map((transaction) => (
+                          <div
+                            key={transaction.id}
+                            className="flex items-center justify-between py-3 border-b border-border last:border-0"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div
+                                className={cn(
+                                  "flex h-10 w-10 items-center justify-center rounded-full",
+                                  transaction.type === "v2g_earning"
+                                    ? "bg-secondary/20"
+                                    : "bg-destructive/20"
+                                )}
+                              >
+                                {transaction.type === "v2g_earning" ? (
+                                  <ArrowUp className="h-5 w-5 text-secondary" />
+                                ) : (
+                                  <ArrowDown className="h-5 w-5 text-destructive" />
+                                )}
+                              </div>
+                              <div>
+                                <p className="font-medium">
+                                  {transaction.type === "v2g_earning"
+                                    ? "V2G Earning"
+                                    : "Charging"}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                  {formatTime(transaction.created_at)} •{" "}
+                                  {transaction.energy_kwh?.toFixed(1) || 0} kWh
+                                </p>
+                              </div>
+                            </div>
+                            <p
                               className={cn(
-                                "flex h-10 w-10 items-center justify-center rounded-full",
-                                transaction.type === "v2g_earning"
-                                  ? "bg-secondary/20"
-                                  : "bg-destructive/20"
+                                "font-semibold",
+                                transaction.amount > 0
+                                  ? "text-secondary"
+                                  : "text-destructive"
                               )}
                             >
-                              {transaction.type === "v2g_earning" ? (
-                                <ArrowUp className="h-5 w-5 text-secondary" />
-                              ) : (
-                                <ArrowDown className="h-5 w-5 text-destructive" />
-                              )}
-                            </div>
-                            <div>
-                              <p className="font-medium">
-                                {transaction.type === "v2g_earning"
-                                  ? "V2G Earning"
-                                  : "Charging"}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {formatTime(transaction.date)} •{" "}
-                                {transaction.energyKwh} kWh
-                              </p>
-                            </div>
+                              {transaction.amount > 0 ? "+" : ""}NT${" "}
+                              {Math.abs(transaction.amount).toFixed(0)}
+                            </p>
                           </div>
-                          <p
-                            className={cn(
-                              "font-semibold",
-                              transaction.amount > 0
-                                ? "text-secondary"
-                                : "text-destructive"
-                            )}
-                          >
-                            {transaction.amount > 0 ? "+" : ""}NT${" "}
-                            {Math.abs(transaction.amount).toFixed(0)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </TabsContent>
-              ))}
-            </Tabs>
+                        ))}
+                      </div>
+                    ))}
+                  </TabsContent>
+                ))}
+              </Tabs>
+            )}
           </CardContent>
         </Card>
       </div>
