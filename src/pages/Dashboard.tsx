@@ -1,18 +1,20 @@
 import { Bell, Zap } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { useAppStore } from "@/store/appStore";
+import { useAuth } from "@/hooks/useAuth";
+import { useActiveSession } from "@/hooks/useSessions";
+import { useCurrentSoc } from "@/hooks/useCurrentSoc";
+import { usePrimaryVehicle } from "@/hooks/useVehicles";
 import { BatteryRing } from "@/components/dashboard/BatteryRing";
 import { QuickStats } from "@/components/dashboard/QuickStats";
 import { QuickActions } from "@/components/dashboard/QuickActions";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
 import { ConnectionStatus } from "@/components/dashboard/ConnectionStatus";
-import { useSessionSimulation } from "@/hooks/useSessionSimulation";
 
 const Dashboard = () => {
-  const { user, currentSession, currentSoc, vehicles } = useAppStore();
-  
-  // Enable session simulation (battery updates)
-  useSessionSimulation();
+  const { profile } = useAuth();
+  const { data: activeSession } = useActiveSession();
+  const { currentSoc } = useCurrentSoc();
+  const primaryVehicle = usePrimaryVehicle();
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -21,13 +23,13 @@ const Dashboard = () => {
     return "Good evening";
   };
 
-  const status = currentSession
-    ? currentSession.mode === "charging"
+  const status = activeSession
+    ? activeSession.mode === "charging"
       ? "charging"
       : "v2g"
     : "idle";
 
-  const primaryVehicle = vehicles.find((v) => v.isPrimary);
+  const userName = profile?.name || "User";
 
   return (
     <div className="min-h-screen bg-background">
@@ -40,7 +42,7 @@ const Dashboard = () => {
             </div>
             <div>
               <h1 className="font-bold text-lg text-foreground">
-                {getGreeting()}, {user?.name}
+                {getGreeting()}, {userName}
               </h1>
               <p className="text-sm text-muted-foreground">
                 {new Date().toLocaleDateString("en-US", {
@@ -54,7 +56,7 @@ const Dashboard = () => {
           
           <div className="hidden lg:block">
             <h1 className="font-bold text-2xl text-foreground">
-              {getGreeting()}, {user?.name}
+              {getGreeting()}, {userName}
             </h1>
             <p className="text-sm text-muted-foreground">
               {new Date().toLocaleDateString("en-US", {
@@ -73,7 +75,7 @@ const Dashboard = () => {
             </button>
             <Avatar className="h-10 w-10 lg:hidden">
               <AvatarFallback className="bg-primary text-primary-foreground">
-                {user?.name?.charAt(0)}
+                {userName.charAt(0)}
               </AvatarFallback>
             </Avatar>
           </div>
@@ -90,9 +92,9 @@ const Dashboard = () => {
           <BatteryRing
             soc={currentSoc}
             status={status}
-            powerKw={currentSession?.powerKw || 0}
-            energyKwh={currentSession?.energyKwh || 0}
-            batteryCapacity={primaryVehicle?.batteryCapacity || 60}
+            powerKw={activeSession?.power_kw || 0}
+            energyKwh={activeSession?.energy_kwh || 0}
+            batteryCapacity={primaryVehicle?.battery_capacity || 60}
           />
         </div>
 
