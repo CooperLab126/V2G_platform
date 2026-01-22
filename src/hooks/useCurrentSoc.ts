@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { useActiveSession, useUpdateSession } from "./useSessions";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useActiveSession, useUpdateSession, ChargingSession } from "./useSessions";
 import { useCreateTransaction } from "./useTransactions";
 import { usePricing, defaultPricing } from "./usePricing";
 
@@ -19,71 +19,25 @@ export function useCurrentSoc() {
 
   const rate = pricing || defaultPricing;
 
+  // Use refs to avoid stale closures
+  const sessionRef = useRef(activeSession);
+  const rateRef = useRef(rate);
+  
+  useEffect(() => {
+    sessionRef.current = activeSession;
+    rateRef.current = rate;
+  }, [activeSession, rate]);
+
   // Persist SOC to localStorage
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, currentSoc.toString());
   }, [currentSoc]);
 
-  // Simulate charging/V2G when there's an active session
-  useEffect(() => {
-    if (!activeSession || activeSession.status !== "active") return;
-
-    const interval = setInterval(() => {
-      if (activeSession.mode === "charging") {
-        // Charging: increase SOC
-        const targetSoc = activeSession.target_soc || 100;
-        
-        if (currentSoc >= targetSoc) {
-          // Session complete
-          completeSession(activeSession.id, currentSoc, activeSession);
-          return;
-        }
-
-        // Increase SOC by ~1% per second (simulated fast charging)
-        const newSoc = Math.min(currentSoc + 1, targetSoc);
-        const energyAdded = (1 / 100) * 60; // 1% of 60kWh battery
-        
-        setCurrentSoc(newSoc);
-        
-        // Update session energy and amount
-        updateSession.mutate({
-          id: activeSession.id,
-          energy_kwh: activeSession.energy_kwh + energyAdded,
-          amount: activeSession.amount - energyAdded * rate.buy_rate,
-        });
-      } else if (activeSession.mode === "v2g") {
-        // V2G: decrease SOC
-        const minSoc = activeSession.min_soc || 20;
-        
-        if (currentSoc <= minSoc) {
-          // Session complete
-          completeSession(activeSession.id, currentSoc, activeSession);
-          return;
-        }
-
-        // Decrease SOC by ~0.5% per second (simulated V2G)
-        const newSoc = Math.max(currentSoc - 0.5, minSoc);
-        const energySold = (0.5 / 100) * 60; // 0.5% of 60kWh battery
-        
-        setCurrentSoc(Math.round(newSoc));
-        
-        // Update session energy and amount
-        updateSession.mutate({
-          id: activeSession.id,
-          energy_kwh: activeSession.energy_kwh + energySold,
-          amount: activeSession.amount + energySold * rate.sell_rate,
-        });
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [activeSession, currentSoc, rate]);
-
   const completeSession = useCallback(
     async (
       sessionId: string,
       endSoc: number,
-      session: NonNullable<typeof activeSession>
+      session: ChargingSession
     ) => {
       const duration = getSessionDuration(session.start_time);
       
@@ -107,6 +61,71 @@ export function useCurrentSoc() {
     },
     [updateSession, createTransaction]
   );
+
+  // Simulate charging/V2G when there's an active session
+  useEffect(() => {
+    if (!activeSession || activeSession.status !== "active") return;
+
+    const interval = setInterval(() => {
+      const session = sessionRef.current;
+      const currentRate = rateRef.current;
+      
+      if (!session || session.status !== "active") {
+        return;
+      }
+
+      setCurrentSoc((prevSoc) => {
+        if (session.mode === "charging") {
+          // Charging: increase SOC
+          const targetSoc = session.target_soc || 100;
+          
+          if (prevSoc >= targetSoc) {
+            // Session complete
+            completeSession(session.id, prevSoc, session);
+            return prevSoc;
+          }
+
+          // Increase SOC by ~1% per second (simulated fast charging)
+          const newSoc = Math.min(prevSoc + 1, targetSoc);
+          const energyAdded = (1 / 100) * 60; // 1% of 60kWh battery
+          
+          // Update session energy and amount
+          updateSession.mutate({
+            id: session.id,
+            energy_kwh: session.energy_kwh + energyAdded,
+            amount: session.amount - energyAdded * currentRate.buy_rate,
+          });
+
+          return newSoc;
+        } else if (session.mode === "v2g") {
+          // V2G: decrease SOC
+          const minSoc = session.min_soc || 20;
+          
+          if (prevSoc <= minSoc) {
+            // Session complete
+            completeSession(session.id, prevSoc, session);
+            return prevSoc;
+          }
+
+          // Decrease SOC by ~1% per second (simulated V2G)
+          const newSoc = Math.max(prevSoc - 1, minSoc);
+          const energySold = (1 / 100) * 60; // 1% of 60kWh battery
+          
+          // Update session energy and amount
+          updateSession.mutate({
+            id: session.id,
+            energy_kwh: session.energy_kwh + energySold,
+            amount: session.amount + energySold * currentRate.sell_rate,
+          });
+
+          return newSoc;
+        }
+        return prevSoc;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeSession?.id, activeSession?.status, completeSession, updateSession]);
 
   const setSoc = useCallback((soc: number) => {
     setCurrentSoc(Math.max(0, Math.min(100, soc)));
