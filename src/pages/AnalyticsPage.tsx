@@ -1,40 +1,179 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useAppStore } from "@/store/appStore";
+import { useTransactions } from "@/hooks/useTransactions";
+import { useSessions } from "@/hooks/useSessions";
+import { usePricing, defaultPricing } from "@/hooks/usePricing";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, AreaChart, Area } from "recharts";
-import { Leaf, Share2, BatteryCharging, Zap, Clock, Calendar } from "lucide-react";
+import { Leaf, Share2, BatteryCharging, Zap, Clock, Calendar, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { startOfWeek, startOfMonth, startOfYear, format, differenceInMinutes, parseISO } from "date-fns";
 
 const AnalyticsPage = () => {
   const [period, setPeriod] = useState<"week" | "month" | "year">("week");
-  const { transactions } = useAppStore();
+  const { data: transactions, isLoading: transactionsLoading } = useTransactions();
+  const { data: sessions, isLoading: sessionsLoading } = useSessions();
+  const { data: pricing } = usePricing();
+  const currentPricing = pricing || defaultPricing;
 
-  // Mock data for charts
-  const weeklyData = [
-    { name: "Mon", charged: 12, sold: 8 },
-    { name: "Tue", charged: 8, sold: 15 },
-    { name: "Wed", charged: 5, sold: 12 },
-    { name: "Thu", charged: 10, sold: 18 },
-    { name: "Fri", charged: 6, sold: 14 },
-    { name: "Sat", charged: 15, sold: 5 },
-    { name: "Sun", charged: 18, sold: 3 },
-  ];
+  const isLoading = transactionsLoading || sessionsLoading;
 
-  const earningsData = [
-    { name: "Mon", earnings: 34 },
-    { name: "Tue", earnings: 63 },
-    { name: "Wed", earnings: 50 },
-    { name: "Thu", earnings: 76 },
-    { name: "Fri", earnings: 59 },
-    { name: "Sat", earnings: 21 },
-    { name: "Sun", earnings: 13 },
-  ];
+  // Helper to get period start date
+  const getPeriodStart = (date: Date, periodType: "week" | "month" | "year") => {
+    switch (periodType) {
+      case "week":
+        return startOfWeek(date, { weekStartsOn: 1 });
+      case "month":
+        return startOfMonth(date);
+      case "year":
+        return startOfYear(date);
+    }
+  };
 
-  const totalCharged = weeklyData.reduce((sum, d) => sum + d.charged, 0);
-  const totalSold = weeklyData.reduce((sum, d) => sum + d.sold, 0);
+  // Process real data
+  const { chartData, earningsData, totalCharged, totalSold, avgSessionMinutes, mostActiveDay } = useMemo(() => {
+    if (!sessions || !transactions) {
+      return {
+        chartData: [],
+        earningsData: [],
+        totalCharged: 0,
+        totalSold: 0,
+        avgSessionMinutes: 0,
+        mostActiveDay: "N/A",
+      };
+    }
+
+    const now = new Date();
+    const periodStart = getPeriodStart(now, period);
+
+    // Filter sessions by period
+    const filteredSessions = sessions.filter(
+      (s) => new Date(s.start_time) >= periodStart
+    );
+
+    // Filter transactions by period
+    const filteredTransactions = transactions.filter(
+      (t) => new Date(t.created_at) >= periodStart
+    );
+
+    // Group by day for charts
+    const dayNames = period === "week" 
+      ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+      : period === "month"
+      ? Array.from({ length: 31 }, (_, i) => `${i + 1}`)
+      : ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    const energyByDay: Record<string, { charged: number; sold: number }> = {};
+    const earningsByDay: Record<string, number> = {};
+
+    dayNames.forEach((name) => {
+      energyByDay[name] = { charged: 0, sold: 0 };
+      earningsByDay[name] = 0;
+    });
+
+    // Process sessions for energy data
+    filteredSessions.forEach((session) => {
+      const date = new Date(session.start_time);
+      let dayKey: string;
+
+      if (period === "week") {
+        dayKey = format(date, "EEE");
+      } else if (period === "month") {
+        dayKey = format(date, "d");
+      } else {
+        dayKey = format(date, "MMM");
+      }
+
+      if (energyByDay[dayKey]) {
+        if (session.mode === "charging") {
+          energyByDay[dayKey].charged += Number(session.energy_kwh) || 0;
+        } else if (session.mode === "v2g") {
+          energyByDay[dayKey].sold += Number(session.energy_kwh) || 0;
+        }
+      }
+    });
+
+    // Process transactions for earnings data
+    filteredTransactions.forEach((t) => {
+      if (t.type === "v2g_earning" && t.amount > 0) {
+        const date = new Date(t.created_at);
+        let dayKey: string;
+
+        if (period === "week") {
+          dayKey = format(date, "EEE");
+        } else if (period === "month") {
+          dayKey = format(date, "d");
+        } else {
+          dayKey = format(date, "MMM");
+        }
+
+        if (earningsByDay[dayKey] !== undefined) {
+          earningsByDay[dayKey] += t.amount;
+        }
+      }
+    });
+
+    // Convert to chart format
+    const chartData = dayNames.map((name) => ({
+      name,
+      charged: Math.round(energyByDay[name]?.charged || 0),
+      sold: Math.round(energyByDay[name]?.sold || 0),
+    }));
+
+    const earningsData = dayNames.map((name) => ({
+      name,
+      earnings: Math.round(earningsByDay[name] || 0),
+    }));
+
+    // Calculate totals
+    const totalCharged = filteredSessions
+      .filter((s) => s.mode === "charging")
+      .reduce((sum, s) => sum + (Number(s.energy_kwh) || 0), 0);
+
+    const totalSold = filteredSessions
+      .filter((s) => s.mode === "v2g")
+      .reduce((sum, s) => sum + (Number(s.energy_kwh) || 0), 0);
+
+    // Calculate average session duration
+    const completedSessions = filteredSessions.filter((s) => s.end_time);
+    const avgSessionMinutes = completedSessions.length > 0
+      ? completedSessions.reduce((sum, s) => {
+          const duration = differenceInMinutes(
+            parseISO(s.end_time!),
+            parseISO(s.start_time)
+          );
+          return sum + duration;
+        }, 0) / completedSessions.length
+      : 0;
+
+    // Find most active day
+    const sessionsByDay: Record<string, number> = {};
+    filteredSessions.forEach((s) => {
+      const dayKey = format(new Date(s.start_time), "EEEE");
+      sessionsByDay[dayKey] = (sessionsByDay[dayKey] || 0) + 1;
+    });
+
+    const mostActiveDay = Object.entries(sessionsByDay).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
+
+    return { chartData, earningsData, totalCharged, totalSold, avgSessionMinutes, mostActiveDay };
+  }, [sessions, transactions, period]);
+
   const co2Offset = totalSold * 0.5;
   const treesEquivalent = (co2Offset / 20).toFixed(1);
+
+  const formatDuration = (minutes: number) => {
+    const hours = Math.floor(minutes / 60);
+    const mins = Math.round(minutes % 60);
+    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -93,7 +232,7 @@ const AnalyticsPage = () => {
           <CardContent>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={weeklyData} barGap={4}>
+                <BarChart data={chartData} barGap={4}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                   <XAxis dataKey="name" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
                   <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
@@ -151,14 +290,14 @@ const AnalyticsPage = () => {
           <Card>
             <CardContent className="p-4 text-center">
               <Clock className="h-5 w-5 mx-auto text-muted-foreground mb-2" />
-              <p className="text-xl font-bold">2h 15m</p>
+              <p className="text-xl font-bold">{formatDuration(avgSessionMinutes)}</p>
               <p className="text-xs text-muted-foreground">Avg Session</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4 text-center">
               <Calendar className="h-5 w-5 mx-auto text-muted-foreground mb-2" />
-              <p className="text-xl font-bold">Thursday</p>
+              <p className="text-xl font-bold">{mostActiveDay}</p>
               <p className="text-xs text-muted-foreground">Most Active</p>
             </CardContent>
           </Card>
