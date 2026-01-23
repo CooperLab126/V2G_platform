@@ -1,4 +1,4 @@
-import { Home, Calendar, Wallet, BarChart3, Settings, Zap, LogOut } from "lucide-react";
+import { Home, Calendar, Wallet, BarChart3, Settings, Zap, LogOut, Monitor } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store/appStore";
@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 const navItems = [
   { path: "/", icon: Home, label: "Dashboard" },
+  { path: "/monitor", icon: Monitor, label: "Monitor" },
   { path: "/control", icon: Zap, label: "Control" },
   { path: "/schedule", icon: Calendar, label: "Schedule" },
   { path: "/wallet", icon: Wallet, label: "Wallet" },
