@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { MapPin, Plug, Wifi, WifiOff, Zap, Check, ChevronDown } from "lucide-react";
+import { useState, useMemo } from "react";
+import { MapPin, Plug, Wifi, WifiOff, Zap, Check, ChevronDown, BatteryCharging, ArrowUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useStations, Station } from "@/hooks/useStations";
+import { useAllActiveSessions } from "@/hooks/useAllSessions";
 import { cn } from "@/lib/utils";
 
 interface StationSelectorProps {
@@ -18,22 +19,67 @@ interface StationSelectorProps {
   onSelectStation: (station: Station) => void;
 }
 
+type StationStatus = "available" | "charging" | "v2g" | "offline" | "maintenance";
+
+interface EnrichedStation extends Station {
+  computedStatus: StationStatus;
+}
+
 function StationCard({
   station,
   isSelected,
   onSelect,
 }: {
-  station: Station;
+  station: EnrichedStation;
   isSelected: boolean;
   onSelect: () => void;
 }) {
-  const isAvailable = station.status === "available";
-  const isInUse = station.status === "in_use";
+  const isAvailable = station.computedStatus === "available";
+  const isCharging = station.computedStatus === "charging";
+  const isV2G = station.computedStatus === "v2g";
+  const isInUse = isCharging || isV2G;
+  const isOffline = station.computedStatus === "offline" || station.computedStatus === "maintenance";
+
+  const getStatusBadge = () => {
+    if (isAvailable) {
+      return (
+        <Badge className="bg-secondary text-secondary-foreground">
+          <Wifi className="h-3 w-3 mr-1" />
+          Available
+        </Badge>
+      );
+    }
+    if (isCharging) {
+      return (
+        <Badge className="bg-secondary/80 text-secondary-foreground">
+          <BatteryCharging className="h-3 w-3 mr-1" />
+          Charging
+        </Badge>
+      );
+    }
+    if (isV2G) {
+      return (
+        <Badge className="bg-accent text-accent-foreground">
+          <ArrowUp className="h-3 w-3 mr-1" />
+          V2G Active
+        </Badge>
+      );
+    }
+    if (station.computedStatus === "maintenance") {
+      return <Badge variant="outline">Maintenance</Badge>;
+    }
+    return (
+      <Badge variant="destructive">
+        <WifiOff className="h-3 w-3 mr-1" />
+        Offline
+      </Badge>
+    );
+  };
 
   return (
     <button
       onClick={onSelect}
-      disabled={!isAvailable && !isInUse}
+      disabled={isOffline}
       className={cn(
         "w-full p-4 rounded-xl border-2 text-left transition-all",
         isSelected
@@ -52,7 +98,9 @@ function StationCard({
                 ? "bg-secondary/20"
                 : isAvailable
                 ? "bg-primary/10"
-                : isInUse
+                : isCharging
+                ? "bg-secondary/10"
+                : isV2G
                 ? "bg-accent/10"
                 : "bg-muted"
             )}
@@ -64,7 +112,9 @@ function StationCard({
                   ? "text-secondary"
                   : isAvailable
                   ? "text-primary"
-                  : isInUse
+                  : isCharging
+                  ? "text-secondary"
+                  : isV2G
                   ? "text-accent"
                   : "text-muted-foreground"
               )}
@@ -86,31 +136,7 @@ function StationCard({
         </div>
 
         <div className="flex flex-col items-end gap-2">
-          <Badge
-            variant={
-              isAvailable ? "default" : isInUse ? "secondary" : "outline"
-            }
-            className={cn(
-              isAvailable && "bg-secondary text-secondary-foreground",
-              isInUse && "bg-accent text-accent-foreground"
-            )}
-          >
-            {isAvailable ? (
-              <>
-                <Wifi className="h-3 w-3 mr-1" />
-                Available
-              </>
-            ) : isInUse ? (
-              "In Use"
-            ) : station.status === "maintenance" ? (
-              "Maintenance"
-            ) : (
-              <>
-                <WifiOff className="h-3 w-3 mr-1" />
-                Offline
-              </>
-            )}
-          </Badge>
+          {getStatusBadge()}
           {station.v2g_capable && (
             <Badge variant="outline" className="text-xs">
               <Zap className="h-3 w-3 mr-1" />
@@ -137,15 +163,41 @@ export function StationSelector({
 }: StationSelectorProps) {
   const [open, setOpen] = useState(false);
   const { data: stations, isLoading } = useStations();
+  const { data: activeSessions } = useAllActiveSessions();
 
-  const handleSelect = (station: Station) => {
+  // Compute station status based on active sessions
+  const enrichedStations = useMemo<EnrichedStation[]>(() => {
+    if (!stations) return [];
+    
+    return stations.map(station => {
+      // Check if station is offline/maintenance in DB
+      if (station.status === "offline") {
+        return { ...station, computedStatus: "offline" as StationStatus };
+      }
+      if (station.status === "maintenance") {
+        return { ...station, computedStatus: "maintenance" as StationStatus };
+      }
+
+      // Check for active session at this station
+      const activeSession = activeSessions?.find(s => s.station_id === station.id);
+      if (activeSession) {
+        const sessionMode = activeSession.mode === "v2g" ? "v2g" : "charging";
+        return { ...station, computedStatus: sessionMode as StationStatus };
+      }
+
+      // Otherwise it's available
+      return { ...station, computedStatus: "available" as StationStatus };
+    });
+  }, [stations, activeSessions]);
+
+  const handleSelect = (station: EnrichedStation) => {
     onSelectStation(station);
     setOpen(false);
   };
 
-  const availableStations =
-    stations?.filter((s) => s.status === "available" || s.status === "in_use") ||
-    [];
+  const selectableStations = enrichedStations.filter(
+    (s) => s.computedStatus !== "offline" && s.computedStatus !== "maintenance"
+  );
 
   return (
     <Card className="border-2 border-dashed border-muted">
@@ -198,8 +250,8 @@ export function StationSelector({
                 <div className="flex items-center justify-center py-8">
                   <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
                 </div>
-              ) : availableStations.length > 0 ? (
-                availableStations.map((station) => (
+              ) : selectableStations.length > 0 ? (
+                selectableStations.map((station) => (
                   <StationCard
                     key={station.id}
                     station={station}
