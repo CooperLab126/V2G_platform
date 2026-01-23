@@ -11,6 +11,7 @@ import WalletPage from "./pages/WalletPage";
 import SchedulePage from "./pages/SchedulePage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import SettingsPage from "./pages/SettingsPage";
+import MonitorPage from "./pages/MonitorPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import NotFound from "./pages/NotFound";
@@ -74,6 +75,7 @@ const App = () => (
             {/* Protected Routes */}
             <Route element={<ProtectedRoutes />}>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/monitor" element={<MonitorPage />} />
               <Route path="/control" element={<ChargingControl />} />
               <Route path="/wallet" element={<WalletPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
