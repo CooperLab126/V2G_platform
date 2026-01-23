@@ -1,13 +1,15 @@
 import { useState } from "react";
-import { ArrowLeft, BatteryCharging, Zap, Sparkles, Info } from "lucide-react";
+import { ArrowLeft, BatteryCharging, Zap, Sparkles, Info, MapPin, Plug } from "lucide-react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
+import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentSoc } from "@/hooks/useCurrentSoc";
 import { useActiveSession, useCreateSession, useUpdateSession } from "@/hooks/useSessions";
 import { usePrimaryVehicle } from "@/hooks/useVehicles";
+import { useStations } from "@/hooks/useStations";
 import { usePricing, defaultPricing } from "@/hooks/usePricing";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -20,12 +22,18 @@ const ChargingControl = () => {
   const { currentSoc } = useCurrentSoc();
   const { data: activeSession } = useActiveSession();
   const { data: pricing } = usePricing();
+  const { data: stations } = useStations();
   const primaryVehicle = usePrimaryVehicle();
   const createSession = useCreateSession();
   const updateSession = useUpdateSession();
   
   const rate = pricing || defaultPricing;
   const initialMode = (searchParams.get("mode") as Mode) || "charging";
+  const stationId = searchParams.get("station");
+  
+  // Find the selected station
+  const selectedStation = stations?.find(s => s.id === stationId) || null;
+  
   const [mode, setMode] = useState<Mode>(initialMode);
   const [targetSoc, setTargetSoc] = useState(() => Math.max(80, currentSoc));
   const [minSoc, setMinSoc] = useState(() => Math.min(30, currentSoc - 10));
@@ -38,12 +46,14 @@ const ChargingControl = () => {
   // Calculations
   const chargeNeeded = targetSoc - currentSoc;
   const chargeKwh = (chargeNeeded / 100) * batteryCapacity;
-  const chargeTime = chargeKwh > 0 ? Math.ceil(chargeKwh / 22 * 60) : 0;
+  const chargePower = selectedStation?.max_power_ac || 22;
+  const chargeTime = chargeKwh > 0 ? Math.ceil(chargeKwh / chargePower * 60) : 0;
   const chargeCost = chargeKwh * rate.buy_rate;
 
   const sellableEnergy = currentSoc - minSoc;
   const sellKwh = (sellableEnergy / 100) * batteryCapacity;
-  const sellTime = sellKwh > 0 ? Math.ceil(sellKwh / 7.2 * 60) : 0;
+  const v2gPower = 7.2; // V2G typically lower power
+  const sellTime = sellKwh > 0 ? Math.ceil(sellKwh / v2gPower * 60) : 0;
   const sellEarnings = sellKwh * rate.sell_rate;
 
   const handleStartSession = async () => {
@@ -51,7 +61,7 @@ const ChargingControl = () => {
 
     try {
       await createSession.mutateAsync({
-        station_id: "A-01",
+        station_id: stationId || "A-01",
         vehicle_id: primaryVehicle?.id || null,
         mode,
         status: "active",
@@ -61,7 +71,7 @@ const ChargingControl = () => {
         end_soc: null,
         target_soc: mode === "charging" ? targetSoc : null,
         min_soc: mode === "v2g" ? minSoc : null,
-        power_kw: mode === "charging" ? 22 : 7.2,
+        power_kw: mode === "charging" ? chargePower : v2gPower,
         energy_kwh: 0,
         amount: 0,
       });
@@ -106,6 +116,44 @@ const ChargingControl = () => {
       </header>
 
       <div className="px-4 py-6 lg:px-8 space-y-6 max-w-2xl mx-auto">
+        {/* Selected Station Display */}
+        {selectedStation ? (
+          <Card className="border-secondary/50 bg-secondary/5">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-secondary/20">
+                  <Plug className="h-6 w-6 text-secondary" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">{selectedStation.id}</span>
+                    <Badge variant="secondary" className="text-xs">Connected</Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{selectedStation.name}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-medium">{selectedStation.max_power_ac} kW AC</p>
+                  {selectedStation.max_power_dc && (
+                    <p className="text-xs text-muted-foreground">{selectedStation.max_power_dc} kW DC</p>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-dashed border-accent">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3 text-accent">
+                <MapPin className="h-5 w-5" />
+                <p className="text-sm">No station selected. Please select from Dashboard.</p>
+                <Button variant="outline" size="sm" asChild className="ml-auto">
+                  <Link to="/">Select Station</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Mode Selector */}
         <div className="grid grid-cols-3 gap-2">
           <button
@@ -123,15 +171,20 @@ const ChargingControl = () => {
 
           <button
             onClick={() => setMode("v2g")}
+            disabled={selectedStation && !selectedStation.v2g_capable}
             className={cn(
               "flex flex-col items-center gap-2 rounded-xl p-4 border-2 transition-all",
               mode === "v2g"
                 ? "border-accent bg-accent/10"
-                : "border-border bg-card hover:border-accent/50"
+                : "border-border bg-card hover:border-accent/50",
+              selectedStation && !selectedStation.v2g_capable && "opacity-50 cursor-not-allowed"
             )}
           >
             <Zap className={cn("h-6 w-6", mode === "v2g" ? "text-accent" : "text-muted-foreground")} />
             <span className={cn("font-medium text-sm", mode === "v2g" ? "text-accent" : "text-muted-foreground")}>V2G</span>
+            {selectedStation && !selectedStation.v2g_capable && (
+              <span className="text-xs text-muted-foreground">Not supported</span>
+            )}
           </button>
 
           <button disabled className="flex flex-col items-center gap-2 rounded-xl p-4 border-2 border-border bg-muted/50 opacity-50">
@@ -227,7 +280,13 @@ const ChargingControl = () => {
             size="lg"
             className={cn("w-full h-14", mode === "charging" ? "bg-secondary hover:bg-secondary/90" : "bg-accent hover:bg-accent/90")}
             onClick={handleStartSession}
-            disabled={(mode === "charging" && chargeNeeded <= 0) || (mode === "v2g" && sellableEnergy <= 0) || createSession.isPending}
+            disabled={
+              !selectedStation ||
+              (mode === "charging" && chargeNeeded <= 0) ||
+              (mode === "v2g" && sellableEnergy <= 0) ||
+              (mode === "v2g" && !selectedStation?.v2g_capable) ||
+              createSession.isPending
+            }
           >
             {mode === "charging" ? <><BatteryCharging className="h-5 w-5 mr-2" />Start Charging</> : <><Zap className="h-5 w-5 mr-2" />Start V2G</>}
           </Button>

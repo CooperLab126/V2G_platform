@@ -1,20 +1,43 @@
-import { Bell, Zap } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Bell, Zap, Link as LinkIcon } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { useActiveSession } from "@/hooks/useSessions";
 import { useCurrentSoc } from "@/hooks/useCurrentSoc";
 import { usePrimaryVehicle } from "@/hooks/useVehicles";
+import { useStations, Station } from "@/hooks/useStations";
 import { BatteryRing } from "@/components/dashboard/BatteryRing";
 import { QuickStats } from "@/components/dashboard/QuickStats";
 import { QuickActions } from "@/components/dashboard/QuickActions";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
-import { ConnectionStatus } from "@/components/dashboard/ConnectionStatus";
+import { StationSelector } from "@/components/dashboard/StationSelector";
+
+const SELECTED_STATION_KEY = "mcut_selected_station";
 
 const Dashboard = () => {
   const { profile } = useAuth();
   const { data: activeSession } = useActiveSession();
   const { currentSoc } = useCurrentSoc();
   const primaryVehicle = usePrimaryVehicle();
+  const { data: stations } = useStations();
+
+  // Load selected station from localStorage
+  const [selectedStation, setSelectedStation] = useState<Station | null>(null);
+
+  useEffect(() => {
+    const savedStationId = localStorage.getItem(SELECTED_STATION_KEY);
+    if (savedStationId && stations) {
+      const found = stations.find((s) => s.id === savedStationId);
+      if (found) {
+        setSelectedStation(found);
+      }
+    }
+  }, [stations]);
+
+  const handleSelectStation = (station: Station) => {
+    setSelectedStation(station);
+    localStorage.setItem(SELECTED_STATION_KEY, station.id);
+  };
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -84,8 +107,11 @@ const Dashboard = () => {
 
       {/* Content */}
       <div className="px-4 py-6 lg:px-8 space-y-6">
-        {/* Connection Status */}
-        <ConnectionStatus />
+        {/* Station Selector */}
+        <StationSelector
+          selectedStation={selectedStation}
+          onSelectStation={handleSelectStation}
+        />
 
         {/* Battery Status */}
         <div className="flex justify-center py-4">
@@ -102,7 +128,7 @@ const Dashboard = () => {
         <QuickStats />
 
         {/* Quick Actions */}
-        <QuickActions />
+        <QuickActions selectedStation={selectedStation} />
 
         {/* Recent Activity */}
         <RecentActivity />
